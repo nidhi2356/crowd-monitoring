@@ -1,0 +1,21 @@
+server:
+  port: 8080
+
+spring:
+  data:
+    mongodb:
+      # Update this if your MongoDB is elsewhere.
+      uri: mongodb+srv://nidhisharma00200:28november2004@cluster0.qxefjgv.mongodb.net/crowdManagement?retryWrites=true&w=majority
+
+crowd:
+  scheduler:
+    # Collector runs once per minute.
+    fixedDelayMs: 60000
+  cors:
+    # Used by the React dev server.
+    allowedOrigins: "http://localhost:5173"
+  external:
+    mockMode: true
+    cameraApiUrl: ""
+    wifiProbeApiUrl: ""
+
