@@ -10,6 +10,8 @@ import com.crowdmonitoring.dashboard.model.AlertDocument;
 
 public interface AlertRepository extends MongoRepository<AlertDocument, String> {
 
+  long countByIsActiveTrue();
+
   List<AlertDocument> findByIsActiveTrueOrderByTimestampDesc();
 
   List<AlertDocument> findTop20ByOrderByTimestampDesc();

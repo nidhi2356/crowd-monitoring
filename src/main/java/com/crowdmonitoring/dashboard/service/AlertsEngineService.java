@@ -107,6 +107,7 @@ public class AlertsEngineService {
 
   private AlertResponse toResponse(AlertDocument doc) {
     return AlertResponse.builder()
+        .id(doc.getId())
         .zone(doc.getZone())
         .message(doc.getMessage())
         .severity(doc.getSeverity())

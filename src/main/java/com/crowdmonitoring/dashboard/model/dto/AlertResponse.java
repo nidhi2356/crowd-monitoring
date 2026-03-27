@@ -12,6 +12,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @Builder
 public class AlertResponse {
+  private String id;
   private String zone;
   private String message;
   private String severity; // High | Medium | Low

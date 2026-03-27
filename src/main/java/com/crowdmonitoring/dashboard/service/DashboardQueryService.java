@@ -71,8 +71,12 @@ public class DashboardQueryService {
         .exitRate(sensorDoc.getExitRate())
         .build();
 
+    // Count active alerts
+    int activeAlertCount = (int) alertRepository.countByIsActiveTrue();
+
     return DashboardResponse.builder()
         .totalCrowd(totalCrowd)
+        .activeAlertCount(activeAlertCount)
         .networkScore(networkScore)
         .peakCrowd(peakCrowd)
         .zones(zoneStats)

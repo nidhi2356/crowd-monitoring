@@ -13,6 +13,7 @@ import lombok.NoArgsConstructor;
 @Builder
 public class DashboardResponse {
   private long totalCrowd;
+  private int activeAlertCount;
   private double networkScore; // 0..100
   private long peakCrowd;
   private List<ZoneStatsResponse> zones;
