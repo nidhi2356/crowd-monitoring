@@ -1,69 +1,61 @@
 package com.crowdmonitoring.dashboard.service;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import org.springframework.stereotype.Service;
 
-import com.crowdmonitoring.dashboard.model.HeatmapDataPoint;
+import com.crowdmonitoring.dashboard.model.dto.AiSensorPayload;
 import com.crowdmonitoring.dashboard.model.dto.HeatmapPointResponse;
 import com.crowdmonitoring.dashboard.model.dto.HeatmapResponse;
-import com.crowdmonitoring.dashboard.repository.HeatmapDataRepository;
 
 @Service
 public class HeatmapDataService {
 
-  private final ZoneRegistry zoneRegistry = new ZoneRegistry();
+  private final ZoneDataBuffer zoneDataBuffer;
+  private final ZoneRegistry zoneRegistry;
 
-  public void persistHeatmap(
-      List<ZoneComputationResult> zoneResults,
-      Instant now,
-      HeatmapDataRepository heatmapRepository
-  ) {
-    Map<String, double[]> coords = zoneRegistry.getZoneCoordinates();
-    List<HeatmapDataPoint> toSave = new ArrayList<>();
-
-    for (ZoneComputationResult z : zoneResults) {
-      double[] latLng = coords.get(z.zoneName());
-      if (latLng == null) continue;
-
-      HeatmapDataPoint point = HeatmapDataPoint.builder()
-          .zone(z.zoneName())
-          .timestamp(now)
-          .lat(latLng[0])
-          .lng(latLng[1])
-          .intensity(z.intensity())
-          .build();
-
-      toSave.add(point);
-    }
-
-    if (!toSave.isEmpty()) {
-      heatmapRepository.saveAll(toSave);
-    }
+  public HeatmapDataService(
+          ZoneDataBuffer zoneDataBuffer,
+          ZoneRegistry zoneRegistry) {
+    this.zoneDataBuffer = zoneDataBuffer;
+    this.zoneRegistry = zoneRegistry;
   }
 
-  public HeatmapResponse getLatestHeatmap(HeatmapDataRepository heatmapRepository) {
-    Instant latest = heatmapRepository.findTopByOrderByTimestampDesc()
-        .map(HeatmapDataPoint::getTimestamp)
-        .orElse(null);
+  public HeatmapResponse getRealtimeHeatmap() {
 
-    if (latest == null) {
-      return HeatmapResponse.builder().points(List.of()).build();
-    }
+    // Get latest AI data per zone
+    Map<String, AiSensorPayload> latest =
+            zoneDataBuffer.getLatestPerZone();
 
-    List<HeatmapDataPoint> points = heatmapRepository.findByTimestampOrderByZoneAsc(latest);
-    List<HeatmapPointResponse> mapped = points.stream()
-        .map(p -> HeatmapPointResponse.builder()
-            .lat(p.getLat())
-            .lng(p.getLng())
-            .intensity(p.getIntensity())
-            .build())
-        .toList();
+    Map<String, double[]> coords =
+            zoneRegistry.getZoneCoordinates();
 
-    return HeatmapResponse.builder().points(mapped).build();
+    List<HeatmapPointResponse> points = latest.entrySet()
+            .stream()
+            .map(entry -> {
+              String zone = entry.getKey();
+              AiSensorPayload payload = entry.getValue();
+
+              if (zone == null || payload == null) return null;
+
+              double[] latLng = coords.get(zone);
+              if (latLng == null) return null;
+
+              return HeatmapPointResponse.builder()
+                      .zone(zone)
+                      .lat(latLng[0])
+                      .lng(latLng[1])
+                      .intensity(payload.getIntensity())
+                      .timestamp(Instant.now())
+                      .build();
+            })
+            .filter(p -> p != null)
+            .toList();
+
+    return HeatmapResponse.builder()
+            .points(points)
+            .build();
   }
 }
-

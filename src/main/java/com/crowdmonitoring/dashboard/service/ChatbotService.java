@@ -75,7 +75,7 @@ public class ChatbotService {
     );
     AlertsResponse alerts = alertsEngineService.buildAlertsResponse(alertRepo);
     AnalyticsResponse analytics = analyticsEngineService.buildAnalyticsResponse(hourlyRepo, dailyRepo, now);
-    HeatmapResponse heatmap = heatmapDataService.getLatestHeatmap(heatmapRepo);
+    HeatmapResponse heatmap = heatmapDataService.getRealtimeHeatmap();
 
     List<ZoneStatsResponse> zones = dashboard.getZones() == null ? List.of() : dashboard.getZones();
 

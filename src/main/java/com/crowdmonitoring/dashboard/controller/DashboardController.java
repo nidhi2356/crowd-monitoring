@@ -3,6 +3,7 @@ package com.crowdmonitoring.dashboard.controller;
 import java.time.Instant;
 
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.crowdmonitoring.dashboard.model.dto.AlertsResponse;
@@ -36,16 +37,16 @@ public class DashboardController {
   private final SensorStatusRepository sensorStatusRepo;
 
   public DashboardController(
-      DashboardQueryService dashboardQueryService,
-      AlertsEngineService alertsEngineService,
-      AnalyticsEngineService analyticsEngineService,
-      HeatmapDataService heatmapDataService,
-      CrowdMinuteDataRepository crowdRepo,
-      AlertRepository alertRepo,
-      HourlyDataRepository hourlyRepo,
-      DailySummaryRepository dailyRepo,
-      HeatmapDataRepository heatmapRepo,
-      SensorStatusRepository sensorStatusRepo
+          DashboardQueryService dashboardQueryService,
+          AlertsEngineService alertsEngineService,
+          AnalyticsEngineService analyticsEngineService,
+          HeatmapDataService heatmapDataService,
+          CrowdMinuteDataRepository crowdRepo,
+          AlertRepository alertRepo,
+          HourlyDataRepository hourlyRepo,
+          DailySummaryRepository dailyRepo,
+          HeatmapDataRepository heatmapRepo,
+          SensorStatusRepository sensorStatusRepo
   ) {
     this.dashboardQueryService = dashboardQueryService;
     this.alertsEngineService = alertsEngineService;
@@ -59,14 +60,13 @@ public class DashboardController {
     this.sensorStatusRepo = sensorStatusRepo;
   }
 
+  // ─── GET ENDPOINTS (initial page load) ───────────────────────
+
   @GetMapping("/dashboard")
   public DashboardResponse getDashboard() {
     return dashboardQueryService.buildDashboardResponse(
-        crowdRepo,
-        alertRepo,
-        sensorStatusRepo,
-        hourlyRepo,
-        Instant.now()
+            crowdRepo, alertRepo, sensorStatusRepo,
+            hourlyRepo, Instant.now()
     );
   }
 
@@ -77,12 +77,37 @@ public class DashboardController {
 
   @GetMapping("/analytics")
   public AnalyticsResponse getAnalytics() {
-    return analyticsEngineService.buildAnalyticsResponse(hourlyRepo, dailyRepo, Instant.now());
+    return analyticsEngineService.buildAnalyticsResponse(
+            hourlyRepo, dailyRepo, Instant.now()
+    );
   }
 
   @GetMapping("/heatmap")
   public HeatmapResponse getHeatmap() {
-    return heatmapDataService.getLatestHeatmap(heatmapRepo);
+    return heatmapDataService.getRealtimeHeatmap();
+  }
+
+  // ─── PUT ENDPOINTS (backend pushes updated data) ─────────────
+
+  /**
+   * Called when backend wants to push latest dashboard
+   * summary to frontend (e.g. after aggregation completes).
+   * Frontend can also poll this if WebSocket is unavailable.
+   */
+  @PutMapping("/dashboard")
+  public DashboardResponse pushDashboard() {
+    return dashboardQueryService.buildDashboardResponse(
+            crowdRepo, alertRepo, sensorStatusRepo,
+            hourlyRepo, Instant.now()
+    );
+  }
+
+  /**
+   * Called when backend wants to push latest alert state.
+   * Useful for alert panel refresh after alert resolution.
+   */
+  @PutMapping("/alerts")
+  public AlertsResponse pushAlerts() {
+    return alertsEngineService.buildAlertsResponse(alertRepo);
   }
 }
-
