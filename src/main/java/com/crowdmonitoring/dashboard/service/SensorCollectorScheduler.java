@@ -14,26 +14,8 @@ import com.crowdmonitoring.dashboard.model.CrowdMinuteData;
 import com.crowdmonitoring.dashboard.model.HeatmapDataPoint;
 import com.crowdmonitoring.dashboard.model.SensorStatusDocument;
 import com.crowdmonitoring.dashboard.model.dto.AiSensorPayload;
-import com.crowdmonitoring.dashboard.repository.AlertRepository;
-import com.crowdmonitoring.dashboard.repository.CrowdMinuteDataRepository;
-import com.crowdmonitoring.dashboard.repository.DailySummaryRepository;
-import com.crowdmonitoring.dashboard.repository.HeatmapDataRepository;
-import com.crowdmonitoring.dashboard.repository.HourlyDataRepository;
-import com.crowdmonitoring.dashboard.repository.SensorStatusRepository;
+import com.crowdmonitoring.dashboard.repository.*;
 
-/**
- * Runs every 60 seconds.
- *
- * Responsibility:
- * 1. Drain the ZoneDataBuffer (filled by AI WebSocket messages)
- * 2. Compute 60-second aggregates per zone
- * 3. Write aggregated results to MongoDB
- * 4. Clear buffer
- *
- * Does NOT fetch sensor data (AI does that).
- * Does NOT compute crowd metrics (AI does that).
- * Does NOT broadcast to frontend (AiDataIngestionController does that live).
- */
 @Service
 public class SensorCollectorScheduler {
 
@@ -76,16 +58,17 @@ public class SensorCollectorScheduler {
 
   @Scheduled(fixedDelayString = "${crowd.scheduler.fixedDelayMs:60000}")
   public void aggregateAndStore() {
+
     try {
       Instant now = Instant.now();
       Instant minuteTs = now.truncatedTo(ChronoUnit.MINUTES);
 
-      // Step 1: Drain buffer — get all AI payloads from last 60s
+      // STEP 1: Get buffered AI data
       Map<String, List<AiSensorPayload>> buffered =
               zoneDataBuffer.drainAndClear();
 
       if (buffered.isEmpty()) {
-        log.warn("Buffer empty at aggregation time — no AI data received");
+        log.warn("No AI data received in last cycle");
         return;
       }
 
@@ -93,55 +76,75 @@ public class SensorCollectorScheduler {
       double totalEntryRate = 0;
       double totalExitRate = 0;
       long activeSensors = 0;
-      Map<String, double[]> coords = zoneRegistry.getZoneCoordinates();
 
-      // Step 2: Aggregate per zone
-      for (Map.Entry<String, List<AiSensorPayload>> entry
-              : buffered.entrySet()) {
+      Map<String, double[]> coords =
+              zoneRegistry.getZoneCoordinates();
+
+      // STEP 2: Process each zone
+      for (Map.Entry<String, List<AiSensorPayload>> entry : buffered.entrySet()) {
 
         String zone = entry.getKey();
         List<AiSensorPayload> payloads = entry.getValue();
 
         if (payloads.isEmpty()) continue;
 
-        // Compute averages over the 60s window
+        // ===== CALCULATIONS =====
+
+        // Average Crowd
         double avgCrowd = payloads.stream()
                 .mapToLong(AiSensorPayload::getTotalCrowd)
                 .average().orElse(0);
 
+        // Peak Crowd
         long peakCrowd = payloads.stream()
                 .mapToLong(AiSensorPayload::getTotalCrowd)
                 .max().orElse(0);
 
+        // Intensity
         double avgIntensity = payloads.stream()
-                .mapToDouble(AiSensorPayload::getIntensity)
+                .mapToDouble(p -> p.getTotalCrowd() / 250.0)
                 .average().orElse(0);
 
-        double avgRiskScore = payloads.stream()
-                .mapToDouble(AiSensorPayload::getRiskScore)
-                .average().orElse(0);
-
+        // Network Score
         double avgNetworkScore = payloads.stream()
-                .mapToDouble(AiSensorPayload::getNetworkScore)
+                .mapToDouble(p -> ((p.getAvgRSSI() + 90.0) / 30.0) * 100.0)
                 .average().orElse(0);
 
+        // Risk Score
+        double avgRiskScore =
+                (0.65 * avgIntensity * 100.0) +
+                        (0.35 * (100.0 - avgNetworkScore));
+
+        // Entry / Exit Rate
+        double avgEntryRate = 0;
+        double avgExitRate = 0;
+
+        for (int i = 1; i < payloads.size(); i++) {
+          long prev = payloads.get(i - 1).getTotalCrowd();
+          long curr = payloads.get(i).getTotalCrowd();
+
+          if (curr > prev) avgEntryRate += (curr - prev);
+          else avgExitRate += (prev - curr);
+        }
+
+        avgEntryRate /= payloads.size();
+        avgExitRate /= payloads.size();
+
+        // Avg RSSI
         double avgRSSI = payloads.stream()
                 .mapToDouble(AiSensorPayload::getAvgRSSI)
                 .average().orElse(0);
 
-        double avgEntryRate = payloads.stream()
-                .mapToDouble(AiSensorPayload::getEntryRate)
-                .average().orElse(0);
-
-        double avgExitRate = payloads.stream()
-                .mapToDouble(AiSensorPayload::getExitRate)
-                .average().orElse(0);
-
-        // Use last payload's density (most recent)
+        // Density
         AiSensorPayload last = payloads.get(payloads.size() - 1);
-        String density = last.getDensity();
+        long crowd = last.getTotalCrowd();
 
-        // Step 3: Write crowd_minute_data to MongoDB
+        String density;
+        if (crowd < 50) density = "Low";
+        else if (crowd <= 150) density = "Medium";
+        else density = "High";
+
+        // ===== SAVE CROWD DATA =====
         CrowdMinuteData doc = CrowdMinuteData.builder()
                 .zone(zone)
                 .timestamp(minuteTs)
@@ -159,7 +162,7 @@ public class SensorCollectorScheduler {
 
         crowdRepo.save(doc);
 
-        // Step 4: Write heatmap_data to MongoDB
+        // ===== SAVE HEATMAP =====
         double[] latLng = coords.get(zone);
         if (latLng != null) {
           HeatmapDataPoint heatPoint = HeatmapDataPoint.builder()
@@ -169,21 +172,22 @@ public class SensorCollectorScheduler {
                   .lng(latLng[1])
                   .intensity(avgIntensity)
                   .build();
+
           heatmapRepo.save(heatPoint);
         }
 
         totalCrowd += Math.round(avgCrowd);
         totalEntryRate += avgEntryRate;
         totalExitRate += avgExitRate;
-        activeSensors += 2; // camera + wifi per zone
+        activeSensors += 2;
       }
 
-      // Step 5: Update hourly_data and daily_summary
+      // ===== ANALYTICS =====
       analyticsEngineService.updateAggregates(
               totalCrowd, minuteTs, hourlyRepo, dailyRepo
       );
 
-      // Step 6: Write sensor_status to MongoDB
+      // ===== SENSOR STATUS =====
       long uptimeSeconds =
               (System.currentTimeMillis() - appStartMillis) / 1000;
 
@@ -198,11 +202,11 @@ public class SensorCollectorScheduler {
 
       sensorStatusRepo.save(statusDoc);
 
-      log.info("Aggregation complete — zones: {}, totalCrowd: {}",
+      log.info("Aggregation complete. Zones: {}, Total Crowd: {}",
               buffered.size(), totalCrowd);
 
     } catch (Exception e) {
-      log.error("Aggregation scheduler failed", e);
+      log.error("Scheduler failed", e);
     }
   }
 }

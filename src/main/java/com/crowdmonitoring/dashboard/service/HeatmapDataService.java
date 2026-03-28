@@ -43,13 +43,13 @@ public class HeatmapDataService {
               double[] latLng = coords.get(zone);
               if (latLng == null) return null;
 
-              return HeatmapPointResponse.builder()
-                      .zone(zone)
-                      .lat(latLng[0])
-                      .lng(latLng[1])
-                      .intensity(payload.getIntensity())
-                      .timestamp(Instant.now())
-                      .build();
+                return HeatmapPointResponse.builder()
+                        .zone(zone)
+                        .lat(latLng[0])
+                        .lng(latLng[1])
+                        .intensity(payload.getTotalCrowd() / 250.0)  // ✅ FIX
+                        .timestamp(Instant.now())
+                        .build();
             })
             .filter(p -> p != null)
             .toList();
